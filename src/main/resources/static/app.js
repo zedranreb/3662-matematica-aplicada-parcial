@@ -32,6 +32,30 @@ function showCode(code) {
   }
 }
 
+
+function clearTokenDisplay() {
+  lastCode = null;
+
+  $('code').textContent = '––– –––';
+  $('code').classList.remove('flash', 'urgent');
+
+  $('steps-origin').textContent = mode === 'HOTP'
+      ? 'generá un código para ver el cálculo'
+      : 'actualizando código vigente';
+
+  $('f-counter').textContent = '';
+  $('s-counter').textContent = '';
+  $('s-hmac').textContent = '';
+  $('s-trunc').textContent = '';
+  $('s-mod').textContent = '';
+
+  $('remaining').textContent = '–';
+  $('tstep').textContent = '–';
+  $('bar-fill').style.width = '0%';
+  $('bar-fill').classList.remove('urgent');
+}
+
+
 function showTrace(t, origin) {
   $('steps-origin').textContent = origin;
   const isTotp = mode === 'TOTP';
@@ -53,6 +77,9 @@ async function refreshTotp() {
   if (mode !== 'TOTP') return;
   try {
     const d = await api('/totp');
+
+    if (mode !== 'TOTP') return;
+
     deadline = performance.now() + d.remainingMs;
     showCode(d.code);
     $('tstep').textContent = d.trace.counter;
@@ -108,9 +135,10 @@ function setMode(m) {
     : 'Recalcula HOTP(K, C) con su propio contador. Si el token se adelantó, busca hasta 5 contadores hacia adelante y se resincroniza.';
   setResult('Ingresá el código del token para validarlo.', '');
   $('verify-code').value = '';
-  lastCode = null;
+  deadline = 0;
+  clearTokenDisplay();
+
   if (totp) refreshTotp();
-  else { showCode(null); $('steps-origin').textContent = 'generá un código para ver el cálculo'; }
 }
 
 async function changeSecret(call, okMsg) {

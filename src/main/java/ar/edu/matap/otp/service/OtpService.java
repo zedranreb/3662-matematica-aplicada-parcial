@@ -10,6 +10,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.HashMap;
 
 /**
  * Estado de la simulación (en memoria): un secreto compartido K entre el token y el servidor,
@@ -28,6 +29,8 @@ public class OtpService {
     private byte[] key;
     private long tokenCounter;
     private long serverCounter;
+    private final Map<String, Long> lastAcceptedTotpCounterBySecret =
+            new HashMap<>();
 
     public OtpService() {
         newRandomSecret();
@@ -56,18 +59,20 @@ public class OtpService {
             throw new IllegalArgumentException("Ingresá un secreto en Base32.");
         }
         byte[] k = Base32.decode(base32);
-        if (k.length < 10) {
+        if (k.length < 16) {
             throw new IllegalArgumentException(
-                    "El secreto es demasiado corto: se requieren al menos 80 bits (16 caracteres Base32).");
+                    "El secreto es demasiado corto: se requieren al menos 128 bits (16 bytes).");
         }
         setKey(k);
     }
+
 
     private void setKey(byte[] k) {
         this.key = k;
         this.tokenCounter = 0;
         this.serverCounter = 0;
     }
+
 
     public synchronized void resetCounters() {
         tokenCounter = 0;
@@ -104,14 +109,38 @@ public class OtpService {
             throw new IllegalArgumentException("El código debe tener exactamente " + DIGITS + " dígitos numéricos.");
         }
         Map<String, Object> m = new LinkedHashMap<>();
+
+
         if ("TOTP".equalsIgnoreCase(mode)) {
             long now = System.currentTimeMillis() / 1000;
             Hotp.Trace expected = Totp.trace(key, now, PERIOD, DIGITS);
-            boolean ok = constantTimeEquals(expected.code(), code);
+
+            // Identificamos el secreto utilizado.
+            String secretId = Base32.encode(key);
+
+            // Recuperamos el último intervalo aceptado para ese secreto.
+            long lastAccepted = lastAcceptedTotpCounterBySecret
+                    .getOrDefault(secretId, -1L);
+
+            boolean matches = constantTimeEquals(expected.code(), code);
+            boolean alreadyUsed = expected.counter() <= lastAccepted;
+            boolean ok = matches && !alreadyUsed;
+
+            if (ok) {
+                lastAcceptedTotpCounterBySecret.put(
+                        secretId, expected.counter());
+            }
+
             m.put("valid", ok);
             m.put("message", ok
-                    ? "Código válido para el intervalo T = " + expected.counter() + "."
-                    : "Código inválido o vencido: no coincide con el del intervalo T = " + expected.counter() + ".");
+                    ? "Código válido para el intervalo T = "
+                    + expected.counter() + "."
+                    : matches && alreadyUsed
+                    ? "Código rechazado: este intervalo TOTP ya fue "
+                    + "utilizado o es anterior a uno aceptado."
+                    : "Código inválido o vencido: no coincide con "
+                    + "el del intervalo T = "
+                    + expected.counter() + ".");
             m.put("trace", expected);
         } else if ("HOTP".equalsIgnoreCase(mode)) {
             boolean ok = false;
